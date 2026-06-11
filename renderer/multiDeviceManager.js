@@ -787,19 +787,114 @@ class MultiDeviceManager {
     try {
       const ports = await SerialPort.list();
       console.log('[MultiDeviceManager] SerialPort.list() returned:', ports.length, ports);
+
+      // On macOS, many devices expose both /dev/tty.usb* and /dev/cu.usb* interfaces.
+      // Prefer /dev/cu.* for app communication and suppress the matching /dev/tty.* duplicate.
+      const portPaths = new Set(ports.map((p) => p.path));
+
       // Detailed logging for each port
       ports.forEach((port, idx) => {
         console.log(`[MultiDeviceManager] Port ${idx}:`, JSON.stringify(port, null, 2));
       });
-      // Filter for guitar devices
-      const guitarDevices = ports.filter(port => {
-        const isGuitar = port.pnpId && port.pnpId.includes('MI_02');
-        console.log(`[MultiDeviceManager] Filter check for port ${port.path}: pnpId=${port.pnpId} => ${isGuitar ? 'INCLUDED' : 'EXCLUDED'}`);
-        if (!isGuitar) {
+      // Filter for guitar devices using cross-platform heuristics.
+      // Windows commonly exposes pnpId with MI_02, while macOS often exposes /dev/cu.* paths
+      // with sparse metadata (no pnpId), so we accept known USB serial indicators.
+      let guitarDevices = ports.filter((port) => {
+        const pathLower = (port.path || '').toLowerCase();
+        const pnpIdLower = (port.pnpId || '').toLowerCase();
+        const manufacturerLower = (port.manufacturer || '').toLowerCase();
+        const productLower = (port.productId || '').toLowerCase();
+        const vendorLower = (port.vendorId || '').toLowerCase();
+        const serialLower = (port.serialNumber || '').toLowerCase();
+        const friendlyLower = (port.friendlyName || '').toLowerCase();
+
+        const hasWindowsInterfaceMarker = pnpIdLower.includes('mi_02');
+        const hasUsbPathMarker =
+          pathLower.includes('/dev/cu.usb') ||
+          pathLower.includes('/dev/tty.usb') ||
+          pathLower.includes('usbmodem') ||
+          pathLower.includes('usbserial');
+        const hasKnownTextMarker =
+          manufacturerLower.includes('bumblegum') ||
+          manufacturerLower.includes('circuitpython') ||
+          manufacturerLower.includes('adafruit') ||
+          manufacturerLower.includes('raspberry') ||
+          serialLower.includes('circuitpython') ||
+          friendlyLower.includes('bumblegum') ||
+          friendlyLower.includes('circuitpython') ||
+          friendlyLower.includes('usb serial');
+        const hasUsbIdentity = Boolean(vendorLower && productLower);
+        const hasMatchingCuInterface =
+          pathLower.startsWith('/dev/tty.usb') &&
+          portPaths.has(port.path.replace('/dev/tty.', '/dev/cu.'));
+
+        const isCandidate = hasWindowsInterfaceMarker || hasKnownTextMarker || hasUsbPathMarker;
+        const includeThisPort = isCandidate && !hasMatchingCuInterface;
+
+        console.log(
+          `[MultiDeviceManager] Filter check for ${port.path}: ` +
+          `winMarker=${hasWindowsInterfaceMarker}, usbPath=${hasUsbPathMarker}, ` +
+          `knownText=${hasKnownTextMarker}, usbId=${hasUsbIdentity}, ` +
+          `macDupTty=${hasMatchingCuInterface} => ${includeThisPort ? 'INCLUDED' : 'EXCLUDED'}`
+        );
+
+        if (!includeThisPort) {
           console.log('[MultiDeviceManager] Port filtered out:', port);
         }
-        return isGuitar;
+
+        return includeThisPort;
       });
+
+      const getInterfaceNumber = (portPath) => {
+        const match = String(portPath || '').match(/(\d+)$/);
+        return match ? parseInt(match[1], 10) : -1;
+      };
+
+      const bumblegumPortsBySerial = new Map();
+      for (const port of guitarDevices) {
+        const manufacturerLower = (port.manufacturer || '').toLowerCase();
+        const serial = String(port.serialNumber || '').trim();
+        if (manufacturerLower.includes('bumblegum') && serial) {
+          if (!bumblegumPortsBySerial.has(serial)) {
+            bumblegumPortsBySerial.set(serial, []);
+          }
+          bumblegumPortsBySerial.get(serial).push(port);
+        }
+      }
+
+      const selectedBumblegumPaths = new Set();
+      for (const [serial, portsForSerial] of bumblegumPortsBySerial.entries()) {
+        if (portsForSerial.length === 1) {
+          selectedBumblegumPaths.add(portsForSerial[0].path);
+          continue;
+        }
+
+        const selectedPort = portsForSerial
+          .slice()
+          .sort((a, b) => {
+            const numDiff = getInterfaceNumber(b.path) - getInterfaceNumber(a.path);
+            if (numDiff !== 0) return numDiff;
+            return String(b.path || '').localeCompare(String(a.path || ''));
+          })[0];
+
+        selectedBumblegumPaths.add(selectedPort.path);
+
+        console.log(
+          `[MultiDeviceManager] Multiple BumbleGum interfaces for serial ${serial} detected (${portsForSerial
+            .map((p) => p.path)
+            .join(', ')}). Keeping highest interface: ${selectedPort.path}`
+        );
+      }
+
+      guitarDevices = guitarDevices.filter((port) => {
+        const manufacturerLower = (port.manufacturer || '').toLowerCase();
+        const serial = String(port.serialNumber || '').trim();
+        if (!(manufacturerLower.includes('bumblegum') && serial)) {
+          return true;
+        }
+        return selectedBumblegumPaths.has(port.path);
+      });
+
       console.log('[MultiDeviceManager] Filtered guitarDevices:', guitarDevices);
       // Log device map population
       const newDevices = new Map();

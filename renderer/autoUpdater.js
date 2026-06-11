@@ -118,10 +118,27 @@ class PortableAutoUpdater {
         this.updateAvailable = true;
         console.log('[AutoUpdater] Update available!');
         
-        // Find executable in release assets (look for .exe files)
-        const portableAsset = release.assets.find(asset => 
-          asset.name.endsWith('.exe') && !asset.name.includes('Setup') && !asset.name.includes('Installer')
-        );
+        // Find the platform-appropriate asset in the release
+        const platform = process.platform; // 'win32', 'darwin', 'linux'
+        let platformAsset;
+        if (platform === 'darwin') {
+          platformAsset = release.assets.find(asset => asset.name.endsWith('.dmg'));
+          if (!platformAsset) {
+            platformAsset = release.assets.find(asset =>
+              asset.name.endsWith('.zip') && asset.name.toLowerCase().includes('mac')
+            );
+          }
+        } else if (platform === 'linux') {
+          platformAsset = release.assets.find(asset =>
+            asset.name.endsWith('.deb') || asset.name.endsWith('.rpm')
+          );
+        } else {
+          // Windows: look for portable .exe
+          platformAsset = release.assets.find(asset =>
+            asset.name.endsWith('.exe') && !asset.name.includes('Setup') && !asset.name.includes('Installer')
+          );
+        }
+        const portableAsset = platformAsset;
 
         // Update is available, notify user first
         const updateInfo = {

@@ -4,6 +4,7 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
   packagerConfig: {
     asar: true,
+    // Forge appends the right extension per platform (.ico on Windows, .icns on macOS)
     icon: './bg-bee-icon',
     name: 'BumbleGum Guitars Configurator',
     files:[
@@ -33,6 +34,15 @@ module.exports = {
           artifactName: 'BumbleGum-Guitars-Configurator-v${version}-portable.exe',
           requestExecutionLevel: 'user'
         }
+      }
+    },
+    {
+      name: '@electron-forge/maker-dmg',
+      platforms: ['darwin'],
+      config: {
+        name: 'BGG Configurator',
+        icon: './bg-bee-icon.icns',
+        format: 'ULFO'
       }
     },
     {

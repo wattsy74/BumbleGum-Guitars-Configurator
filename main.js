@@ -57,6 +57,10 @@ function createWindow() {
 }
 
 ipcMain.handle('cleanup-registry', async (event, psScript) => {
+  if (process.platform !== 'win32') {
+    // Registry cleanup is only relevant on Windows
+    return { err: null, stdout: '', stderr: '' };
+  }
   return new Promise((resolve) => {
     sudo.exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psScript}"`, { name: 'BBG Controller Configurator' }, (err, stdout, stderr) => {
       resolve({ err, stdout, stderr });
@@ -195,19 +199,25 @@ ipcMain.handle('download-update', async (event, { url, fileName, onProgress }) =
 });
 
 ipcMain.handle('install-update', async (event, downloadPath) => {
-  return new Promise((resolve) => {
-    try {
-      console.log(`[AutoUpdater] Installing update from: ${downloadPath}`);
+  try {
+    console.log(`[AutoUpdater] Installing update from: ${downloadPath}`);
 
-      // Get current executable path
-      const currentExePath = process.execPath;
-      const currentDir = path.dirname(currentExePath);
-      const currentExeName = path.basename(currentExePath);
-      const backupPath = path.join(currentDir, `${currentExeName}.backup`);
-      const tempNewPath = path.join(currentDir, `${currentExeName}.new`);
+    // Get current executable path
+    const currentExePath = process.execPath;
+    const currentDir = path.dirname(currentExePath);
+    const currentExeName = path.basename(currentExePath);
+    const backupPath = path.join(currentDir, `${currentExeName}.backup`);
 
-      // Create a batch script to handle the update process
-      const batchScript = `
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      // On macOS/Linux, open the downloaded file (DMG/deb) so the user can install it manually
+      console.log('[AutoUpdater] Non-Windows platform: opening downloaded file for manual install');
+      await shell.openPath(downloadPath);
+      setTimeout(() => app.quit(), 1500);
+      return { success: true, requiresManualInstall: true };
+    }
+
+    // Windows: create a batch script to replace the running executable
+    const batchScript = `
 @echo off
 echo Updating BGG Configurator...
 timeout /t 2 /nobreak >nul
@@ -239,28 +249,27 @@ if exist "${backupPath}" (
 del "%~f0"
 `;
 
-      const batchPath = path.join(currentDir, 'update_installer.bat');
-      fs.writeFileSync(batchPath, batchScript);
+    const batchPath = path.join(currentDir, 'update_installer.bat');
+    fs.writeFileSync(batchPath, batchScript);
 
-      console.log('[AutoUpdater] Starting update installer batch script');
+    console.log('[AutoUpdater] Starting update installer batch script');
 
-      // Execute the batch script and quit the current app
-      spawn('cmd.exe', ['/c', batchPath], {
-        detached: true,
-        stdio: 'ignore'
-      });
+    // Execute the batch script and quit the current app
+    spawn('cmd.exe', ['/c', batchPath], {
+      detached: true,
+      stdio: 'ignore'
+    });
 
-      // Give the batch script a moment to start, then quit
-      setTimeout(() => {
-        app.quit();
-      }, 1000);
+    // Give the batch script a moment to start, then quit
+    setTimeout(() => {
+      app.quit();
+    }, 1000);
 
-      resolve({ success: true });
-    } catch (error) {
-      console.error('[AutoUpdater] Install error:', error);
-      resolve({ success: false, error: error.message });
-    }
-  });
+    return { success: true };
+  } catch (error) {
+    console.error('[AutoUpdater] Install error:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('open-external-link', async (event, url) => {
@@ -293,7 +302,7 @@ ipcMain.handle('close-app', async () => {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  app.quit();
 });
 
 app.on('activate', () => {
