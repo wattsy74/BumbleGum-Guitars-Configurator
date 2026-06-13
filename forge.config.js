@@ -51,11 +51,24 @@ module.exports = {
     },
     {
       name: '@electron-forge/maker-deb',
-      config: {},
+      platforms: ['linux'],
+      config: {
+        maintainer: 'Martyn L. Watts <martyn@bumblegumguitars.com>',
+        homepage: 'https://github.com/wattsy74/BumbleGum-Guitars-Configurator',
+        icon: './bg-bee-icon.png',
+        categories: ['Utility', 'Music'],
+        mimeType: ['application/x-bgg-preset'],
+      },
     },
     {
       name: '@electron-forge/maker-rpm',
-      config: {},
+      platforms: ['linux'],
+      config: {
+        maintainer: 'Martyn L. Watts <martyn@bumblegumguitars.com>',
+        homepage: 'https://github.com/wattsy74/BumbleGum-Guitars-Configurator',
+        icon: './bg-bee-icon.png',
+        categories: ['Utility', 'Music'],
+      },
     },
   ],
   plugins: [
